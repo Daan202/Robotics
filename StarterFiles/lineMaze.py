@@ -46,9 +46,45 @@ def follow_line():
     left_motor.run(speed=5) # Runs the left motor at speed=5
     right_motor.run(speed=5) # Runs the right motor at speed=5
 
+
+
+
+
+def PID_control(kP, kI, kD, error):
+    """
+    Implementation of  (P)roportional,
+                       (I)ntegral,
+                       (D)ifferential,
+                       error response. 
+    """
+    pass
+
+
+
 # Starts coppeliasim simulation if not done already
+sim.setStepping(True)
+
 sim.startSimulation()
 
 # MAIN CONTROL LOOP
-while True:
-	follow_line()
+while (t := sim.getSimulationTime()) < 3:
+    # follow_line()
+    sim.step()
+sim.stopSimulation()
+
+
+# example code from: https://manual.coppeliarobotics.com/en/zmqRemoteApiOverview.htm 
+# to use copellia with python
+# 
+# from coppeliasim_zmqremoteapi_client import RemoteAPIClient
+
+# client = RemoteAPIClient()
+# sim = client.require('sim')
+
+# sim.setStepping(True)
+
+# sim.startSimulation()
+# while (t := sim.getSimulationTime()) < 3:
+#     print(f'Simulation time: {t:.2f} [s]')
+#     sim.step()
+# sim.stopSimulation()
