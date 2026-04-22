@@ -52,6 +52,12 @@ def is_blue_detected(color_sensor):
 
 def img_baseline(middle_skip: int = 0):
     """
+    To be called at the beginning of every PID controller trial.
+    Make sure the robot is centered approximately on the edge of the line. 
+    As it will likely not be centered perfectly, the middle skip gives a percentage of the middle
+    image that can be ignored if desired.
+
+    Returns a dictionary of baseline initial conditions.
     """
     img = color_sensor.get_image()
     left_reflec, right_reflec = split_image(img, middle_skip = middle_skip)
@@ -78,35 +84,25 @@ def split_image(image: np.ndarray, middle_skip: int = 0):
     It is a percentage indicating which portion of the width in the middle of the image to skip,
     such that we have a clean left part and a clean white part, of pure white and black, or pure black and white.
     """
-    assert middle_skip >= 0, 'middle_skip is percentage, so must be larger than or equal to 0'
-    assert middle_skip <= 100, ' middle_skip is percentage, so must be smaller than or equal to 100'
-    # split image in two halves
-    img_width = image.shape[2]
-    half_n_idxs2skip = round((img_width * middle_skip / 100) / 2)
+    assert middle_skip >= 0, 'middle skip should be larger or equal to 0'
+    assert middle_skip <= 10, 'middle_skip is number of pixels, upper bounded by 10 by us (16 is pixel width image)'
+    assert middle_skip % 2 == 0, 'middle_skip should be even'
+    
+     # split image in two halves
 
-    if img_width % 2 == 0:
-        split_idx = img_width / 2
-    else:
-        split_idx = (img_width - 1) / 2
+    split_idx = image.shape[1] / 2
 
-    left_img, right_img = image[:, 0:split_idx - half_n_idxs2skip, :], image[:, split_idx + half_n_idxs2skip:-1, :]
-
+    left_img = image[:, 0:int(split_idx - middle_skip / 2), :]
+    right_img = image[:, int(split_idx + middle_skip / 2):, :]
+    
     return (np.mean(left_img) / 255 * 100), (np.mean(right_img) / 255 * 100)
 
 
 def error_signal(bs_dict: dict,
-                 line_color: str = 'white', 
-                 surround_color: str = 'black', 
                  rgb_weights: tuple[float] = (1,1,1),
                  normalize: bool = True):
     """
     """
-    if not (line_color == 'white' or line_color == 'black'):
-        raise ValueError('line_color should be either white or black')        
-    elif line_color == 'white' and not surround_color == 'black':
-        raise ValueError('surround_color should be black when line_color is white')
-    elif line_color == 'black' and not surround_color == 'white':
-        raise ValueError('surround_color should be white when line_color is black')
     
     if sum(list(rgb_weights)) > 3 or sum(list(rgb_weights)) < 0:
         raise ValueError('some or all of your rgb weights are not between 0 and 1') 
@@ -133,7 +129,7 @@ def error_signal(bs_dict: dict,
         left_reflec = bs_dict['left_reflec']
         right_reflec = bs_dict['right_reflec']
 
-    abs_error = rgb_weights[0] * abs(r - r_bs) + rgb_weights[1] * abs(g - g_bs) + rgb_weights[2] * abs(r - r_bs)
+    abs_error = rgb_weights[0] * abs(r - r_bs) + rgb_weights[1] * abs(g - g_bs) + rgb_weights[2] * abs(b - b_bs)
 
     # determine sign
     left_dif = abs(left_reflec - ambient)
@@ -143,48 +139,53 @@ def error_signal(bs_dict: dict,
         sign = 1 # move right
     elif left_dif > right_dif:
         sign = -1 # move left
+    else:
+        return 0
 
     error = abs_error * sign
 
-    return error
-
+    return error 
     
     
 
 
-
-    img = color_sensor.get_image()
-    left_reflec, right_reflec = split_image(img, middle_skip = 0)
-    
-
-
-
-    
-    
-
-
-def PID_control(kP, kI, kD, error):
+def PID_control(error, kP: float = 1, kI: float = 1, kD: float = 1):
     """
     Implementation of  (P)roportional,
                        (I)ntegral,
                        (D)ifferential,
                        error response. 
     """
-    pass
+    control_signal = kP * error
+
+    return control_signal
+
+
+# if __name__ == "__main__":
+
+#     print(img_baseline())
 
 
 
 # Starts coppeliasim simulation if not done already
-simulation_duration = 100
-
-sim.setStepping(True)
+simulation_duration = 10
 
 sim.startSimulation()
 
 # MAIN CONTROL LOOP
+middle_skip = 4
+initialized = False
 while (t := sim.getSimulationTime()) < simulation_duration:
-    follow_line()
-    # sim.step()
+
+    if not initialized:
+        bs_dict = img_baseline(middle_skip = middle_skip)
+        initialized = True
+    
+    print(error_signal(bs_dict))
+
+    left_motor_cw.run(speed=5) # Runs the left motor at speed=5
+    right_motor_cw.run(speed=5) # Runs the right motor at speed=5
+
 sim.stopSimulation()
 
 
