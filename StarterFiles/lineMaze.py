@@ -39,16 +39,16 @@ def is_blue_detected(color_sensor):
     return blue_intensity > blue_ratio_threshold
 
 
-# def follow_line():
-#     """
-#     A very simple line follower that should be improved.
-#     """
-#     color_sensor._update_image() # Updates the internal image
-#     reflection = color_sensor.reflection() # Gets the reflection from the image
-#     print(reflection)
+def follow_line():
+    """
+    A very simple line follower that should be improved.
+    """
+    color_sensor._update_image() # Updates the internal image
+    reflection = color_sensor.reflection() # Gets the reflection from the image
+    print(reflection)
 
-#     left_motor_cw.run(speed=5) # Runs the left motor at speed=5
-#     right_motor_cw.run(speed=5) # Runs the right motor at speed=5
+    left_motor_cw.run(speed=5) # Runs the left motor at speed=5
+    right_motor_cw.run(speed=5) # Runs the right motor at speed=5
 
 def img_baseline(middle_skip: int = 0):
     """
@@ -165,28 +165,34 @@ def PID_control(error, kP: float = 1, kI: float = 1, kD: float = 1):
 
 #     print(img_baseline())
 
-
-
 # Starts coppeliasim simulation if not done already
-simulation_duration = 10
-
 sim.startSimulation()
 
 # MAIN CONTROL LOOP
-middle_skip = 4
-initialized = False
-while (t := sim.getSimulationTime()) < simulation_duration:
+while True:
+	follow_line()
 
-    if not initialized:
-        bs_dict = img_baseline(middle_skip = middle_skip)
-        initialized = True
+
+# # Starts coppeliasim simulation if not done already
+# simulation_duration = 10
+
+# sim.startSimulation()
+
+# # MAIN CONTROL LOOP
+# middle_skip = 4
+# initialized = False
+# while (t := sim.getSimulationTime()) < simulation_duration:
+
+#     if not initialized:
+#         bs_dict = img_baseline(middle_skip = middle_skip)
+#         initialized = True
     
-    print(error_signal(bs_dict))
+#     print(error_signal(bs_dict))
 
-    left_motor_cw.run(speed=5) # Runs the left motor at speed=5
-    right_motor_cw.run(speed=5) # Runs the right motor at speed=5
+#     left_motor_cw.run(speed=5) # Runs the left motor at speed=5
+#     right_motor_cw.run(speed=5) # Runs the right motor at speed=5
 
-sim.stopSimulation()
+# sim.stopSimulation()
 
 
 # example code from: https://manual.coppeliarobotics.com/en/zmqRemoteApiOverview.htm 
