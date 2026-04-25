@@ -14,21 +14,21 @@ right_motor = Motor(sim, DeviceNames.MOTOR_RIGHT_LINE, Direction.CLOCKWISE)
 color_sensor = ImageSensor(sim, DeviceNames.IMAGE_SENSOR_LINE)
 
 # PID settings
-KP = 0.04
-KI = 0.01
-KD = 0.002
-sample_time = 0.001
+KP =0.03#0.0.03 #0.025 #0.04
+KI = 0.015#0.015
+KD = 0.000#0.002
+sample_time = 0.001#0.001#0.015
 
 # speed settings
-base_speed = 2.0
-max_speed = 15.0
-min_speed = -15.0
+base_speed = 2
+max_speed = 30.0
+min_speed = -30.0
 max_correction = abs(max_speed-base_speed)
 
 
 # Robot and enviroment settings
 reflection_setpoint = 60
-edge_direction =1
+edge_direction =-1
 
 # PID intial state
 integral =0.0
@@ -78,8 +78,10 @@ def pid_control(error):
    
    # Calculate integral and derivative part
     integral += error * dt
+    print('integral',integral)
     #integral = limit(integral, -50,50)
     derivative = (error-previous_error) /dt
+    print('derivative',derivative)
 
    #calculate the output
     output = KP * error + KI * integral + KD * derivative
@@ -183,5 +185,5 @@ def follow_line():
 while True:
    #if keyboard.is_pressed('n'):
       follow_line()
-      time.sleep(0.01)
+      #time.sleep(0.001)
    
