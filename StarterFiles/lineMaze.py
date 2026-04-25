@@ -1,18 +1,41 @@
+from numpy import dtype
+
 from robots import *
 from coppeliasim_zmqremoteapi_client import RemoteAPIClient
+import keyboard
+import time
 
 client = RemoteAPIClient()
 sim = client.require("sim")
-# sim.loadScene('./StarterFiles/scenes/lineMaze.ttt') # from: https://www.youtube.com/watch?v=18P7azRsJY0
 
 # HANDLES FOR ACTUATORS AND SENSORS
-left_motor_cw = Motor(sim, DeviceNames.MOTOR_LEFT_LINE, Direction.CLOCKWISE)
-left_motor_ccw = Motor(sim, DeviceNames.MOTOR_LEFT_LINE, Direction.COUNTERCLOCKWISE)
-
-right_motor_cw = Motor(sim, DeviceNames.MOTOR_RIGHT_LINE, Direction.CLOCKWISE)
-right_motor_ccw = Motor(sim, DeviceNames.MOTOR_RIGHT_LINE, Direction.COUNTERCLOCKWISE)
-
+left_motor = Motor(sim, DeviceNames.MOTOR_LEFT_LINE, Direction.CLOCKWISE)
+right_motor = Motor(sim, DeviceNames.MOTOR_RIGHT_LINE, Direction.CLOCKWISE)
 color_sensor = ImageSensor(sim, DeviceNames.IMAGE_SENSOR_LINE)
+
+# PID settings
+KP = 0.04
+KI = 0.01
+KD = 0.002
+sample_time = 0.01
+
+# speed settings
+base_speed = 2.0
+max_speed = 100.0
+min_speed = -100.0
+max_correction = abs(base_speed-min_speed)
+
+
+# Robot and enviroment settings
+reflection_setpoint = 65
+edge_direction =1
+
+# PID intial state
+integral =0.0
+derivative =0.0
+previous_error =0.0
+previous_output = 0.0
+previous_time = time.monotonic()
 
 def is_red_detected(color_sensor):
     """
@@ -38,175 +61,127 @@ def is_blue_detected(color_sensor):
 
     return blue_intensity > blue_ratio_threshold
 
+def limit (value,minimum,maximum):
+    #limit the value between the max and min
+    return max (minimum, min(maximum,value))
 
+def pid_control(error):
+    global integral , derivative, previous_error ,previous_output,previous_time #TODO : convert the PID to class 
+   #  Calculate the dt
+    current_time = time.monotonic()
+    dt = current_time-previous_time
+    #print ('dt',dt)
+    
+   # the PID can not run faster than the sampling time 
+    if dt < sample_time:
+       return previous_output
+   
+   # Calculate integral and derivative part
+    integral += error * dt
+    #integral = limit(integral, -50,50)
+    derivative = (error-previous_error) /dt
+
+   #calculate the output
+    output = KP * error + KI * integral + KD * derivative
+    print ('output befor limit', output)
+    output = limit(output,-max_correction ,max_correction)
+    print ('limited output', output)
+
+   # update the pervious values 
+    previous_error = error
+    previous_output = output
+    previous_time = current_time
+
+    return output
+
+   
+    
 def follow_line():
     """
     A very simple line follower that should be improved.
     """
     color_sensor._update_image() # Updates the internal image
     reflection = color_sensor.reflection() # Gets the reflection from the image
-    print(reflection)
-
-    left_motor_cw.run(speed=5) # Runs the left motor at speed=5
-    right_motor_cw.run(speed=5) # Runs the right motor at speed=5
-
-def img_baseline(middle_skip: int = 0):
-    """
-    To be called at the beginning of every PID controller trial.
-    Make sure the robot is centered approximately on the edge of the line. 
-    As it will likely not be centered perfectly, the middle skip gives a percentage of the middle
-    image that can be ignored if desired.
-
-    Returns a dictionary of baseline initial conditions.
-    """
-    img = color_sensor.get_image()
-    left_reflec, right_reflec = split_image(img, middle_skip = middle_skip)
-
-    ambient = color_sensor.ambient()
-    r, g, b = color_sensor.rgb()
-
-    dict_keys = ['left_reflec', 'right_reflec', 'ambient', 'r', 'g', 'b']
-    dict_vals = [left_reflec, right_reflec, ambient, r, g, b]
-
-    return dict(zip(dict_keys, dict_vals))
-
-def split_image(image: np.ndarray, middle_skip: int = 0):
-    """
-    For an image from the ImageSensor, it splits it into a left and right part and returns
-    the ambient reflection for the left and right part.
-
-    Assumes that image is 3D (height, width, rgb channels) and that lower halve of indices across
-    the width represent the left and the upper halve of the indices across the width represent the right, 
-    with left and right defined with respect to the 'body' of the robot. 
-
-    When putting the robot on the right edge of the line with the surrounding, the camera
-    is likely not perfectly centered. To account for this, middle_skip can be used.
-    It is a percentage indicating which portion of the width in the middle of the image to skip,
-    such that we have a clean left part and a clean white part, of pure white and black, or pure black and white.
-    """
-    assert middle_skip >= 0, 'middle skip should be larger or equal to 0'
-    assert middle_skip <= 10, 'middle_skip is number of pixels, upper bounded by 10 by us (16 is pixel width image)'
-    assert middle_skip % 2 == 0, 'middle_skip should be even'
-    
-     # split image in two halves
-
-    split_idx = image.shape[1] / 2
-
-    left_img = image[:, 0:int(split_idx - middle_skip / 2), :]
-    right_img = image[:, int(split_idx + middle_skip / 2):, :]
-    
-    return (np.mean(left_img) / 255 * 100), (np.mean(right_img) / 255 * 100)
-
-
-def error_signal(bs_dict: dict,
-                 rgb_weights: tuple[float] = (1,1,1),
-                 normalize: bool = True):
-    """
-    """
-    
-    if sum(list(rgb_weights)) > 3 or sum(list(rgb_weights)) < 0:
-        raise ValueError('some or all of your rgb weights are not between 0 and 1') 
-
-    r, g, b = color_sensor.rgb()
+    red, green, blue = color_sensor.rgb()
+    image = color_sensor.get_image()
     ambient = color_sensor.ambient()
 
-    if normalize:
-        r = r / ambient
-        g = g / ambient
-        b = b / ambient
 
-        r_bs = bs_dict['r'] / bs_dict['ambient']
-        g_bs = bs_dict['g'] / bs_dict['ambient']
-        b_bs = bs_dict['b'] / bs_dict['ambient']
+    # Starts coppeliasim simulation if not done already
+    sim.startSimulation()
+    Manual = False
+    if Manual:
+         #print ("manual is active")
 
-        left_reflec = bs_dict['left_reflec'] / bs_dict['ambient']
-        right_reflec = bs_dict['right_reflec'] / bs_dict['ambient']
-    else:
-        r_bs = bs_dict['r']
-        g_bs = bs_dict['g']
-        b_bs = bs_dict['b']
+         if keyboard.is_pressed('w') :   # move forward
+            speed_f =20
+            left_motor.run(speed=speed_f) # Runs the left motor at speed=5
+            right_motor.run(speed=speed_f) # Runs the right motor at speed=5
+            print('reflection',reflection)
+            print ("red",red)
+            print("green",green)
+            print("blue",blue)
+           # print ('image',image)
+            print ('ambient',ambient)
+            
+         elif keyboard.is_pressed('s'):   # move Backword
+            left_motor.run(speed=-5) # Runs the left motor at speed=5
+            right_motor.run(speed=-5) # Runs the right motor at speed=5
+            print('reflection',reflection)
+            print ("red",red)
+            print("green",green)
+            print("blue",blue)
 
-        left_reflec = bs_dict['left_reflec']
-        right_reflec = bs_dict['right_reflec']
+            print ('ambient',ambient)
 
-    abs_error = rgb_weights[0] * abs(r - r_bs) + rgb_weights[1] * abs(g - g_bs) + rgb_weights[2] * abs(b - b_bs)
+         elif keyboard.is_pressed('d'):   # move to the right
+            left_motor.run(speed= 5) # Runs the left motor at speed=5
+            right_motor.run(speed= 2) # Runs the right motor at speed=5 
+            print('reflection',reflection)
+            print ("red",red)
+            print("green",green)
+            print("blue",blue)
 
-    # determine sign
-    left_dif = abs(left_reflec - ambient)
-    right_dif = abs(right_reflec - ambient)
+            print ('ambient',ambient)
+         elif keyboard.is_pressed('a'):   # move to the left
+            left_motor.run(speed= 2) # Runs the left motor at speed=5
+            right_motor.run(speed= 5) # Runs the right motor at speed=5  
+            print('reflection',reflection)
+            print ("red",red)
+            print("green",green)
+            print("blue",blue)
+            print ('ambient',ambient)
+         else:
+            left_motor.run(speed=0) # Runs the left motor at speed=5
+            right_motor.run(speed=0) # Runs the right motor at speed=5
+            print('ambient',ambient)
+            print('reflection',reflection)
+    else: 
+      # Calculate the error        
+      error = edge_direction *( reflection_setpoint - reflection )
+      print('error', error)
+      print('reflection',reflection)
+      # get the PID control signal
+      control_signal  = pid_control(error)
+      print('control signal',control_signal)
 
-    if left_dif < right_dif:
-        sign = 1 # move right
-    elif left_dif > right_dif:
-        sign = -1 # move left
-    else:
-        return 0
+      # control the robot 
+      #print('control signal',control_signal)
+      #print('reflection',reflection)
 
-    error = abs_error * sign
+      left_speed = limit(base_speed -control_signal, min_speed, max_speed)
+      right_speed = limit(base_speed +control_signal, min_speed, max_speed)
+      print ('leftmotor speed',left_speed)
+      print ('right motor speed',right_speed)
 
-    return error 
-    
-    
-
-
-def PID_control(error, kP: float = 1, kI: float = 1, kD: float = 1):
-    """
-    Implementation of  (P)roportional,
-                       (I)ntegral,
-                       (D)ifferential,
-                       error response. 
-    """
-    control_signal = kP * error
-
-    return control_signal
+      left_motor.run(speed=left_speed) 
+      right_motor.run(speed=right_speed)
 
 
-# if __name__ == "__main__":
-
-#     print(img_baseline())
-
-# Starts coppeliasim simulation if not done already
-sim.startSimulation()
 
 # MAIN CONTROL LOOP
 while True:
-	follow_line()
-
-
-# # Starts coppeliasim simulation if not done already
-# simulation_duration = 10
-
-# sim.startSimulation()
-
-# # MAIN CONTROL LOOP
-# middle_skip = 4
-# initialized = False
-# while (t := sim.getSimulationTime()) < simulation_duration:
-
-#     if not initialized:
-#         bs_dict = img_baseline(middle_skip = middle_skip)
-#         initialized = True
-    
-#     print(error_signal(bs_dict))
-
-#     left_motor_cw.run(speed=5) # Runs the left motor at speed=5
-#     right_motor_cw.run(speed=5) # Runs the right motor at speed=5
-
-# sim.stopSimulation()
-
-
-# example code from: https://manual.coppeliarobotics.com/en/zmqRemoteApiOverview.htm 
-# to use copellia with python
-# 
-# from coppeliasim_zmqremoteapi_client import RemoteAPIClient
-
-# client = RemoteAPIClient()
-# sim = client.require('sim')
-
-# sim.setStepping(True)
-
-# sim.startSimulation()
-# while (t := sim.getSimulationTime()) < 3:
-#     print(f'Simulation time: {t:.2f} [s]')
-#     sim.step()
-# sim.stopSimulation()
+   #if keyboard.is_pressed('n'):
+      follow_line()
+      #time.sleep(0.001)
+   
