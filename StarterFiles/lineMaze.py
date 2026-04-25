@@ -17,17 +17,17 @@ color_sensor = ImageSensor(sim, DeviceNames.IMAGE_SENSOR_LINE)
 KP = 0.04
 KI = 0.01
 KD = 0.002
-sample_time = 0.01
+sample_time = 0.001
 
 # speed settings
 base_speed = 2.0
-max_speed = 100.0
-min_speed = -100.0
-max_correction = abs(base_speed-min_speed)
+max_speed = 15.0
+min_speed = -15.0
+max_correction = abs(max_speed-base_speed)
 
 
 # Robot and enviroment settings
-reflection_setpoint = 65
+reflection_setpoint = 60
 edge_direction =1
 
 # PID intial state
@@ -183,5 +183,5 @@ def follow_line():
 while True:
    #if keyboard.is_pressed('n'):
       follow_line()
-      #time.sleep(0.001)
+      time.sleep(0.01)
    
