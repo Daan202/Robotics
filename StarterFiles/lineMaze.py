@@ -14,10 +14,13 @@ right_motor = Motor(sim, DeviceNames.MOTOR_RIGHT_LINE, Direction.CLOCKWISE)
 color_sensor = ImageSensor(sim, DeviceNames.IMAGE_SENSOR_LINE)
 
 # PID settings
-KP =0.03#0.0.03 #0.025 #0.04
-KI = 0.015#0.015
-KD = 0.000#0.002
-sample_time = 0.001#0.001#0.015
+KP =0.04#0.04#0.0.03 #0.025 #0.04
+KI =0.012#0.09 #0.012#0.015
+KD = 0.001#0.001#0.002
+TD = 0.04
+
+sample_time = 0.015#0.001#0.015
+
 
 # speed settings
 base_speed = 2
@@ -76,13 +79,22 @@ def pid_control(error):
     if dt < sample_time:
        return previous_output
    
-   # Calculate integral and derivative part
+   # Calculate integral 
     integral += error * dt
     print('integral',integral)
-    #integral = limit(integral, -50,50)
-    derivative = (error-previous_error) /dt
+    integral = limit(integral, -100,100)
+
+    # calculate derivative
+    derivative_raw = (error-previous_error) /dt
+    alpha = TD/(TD+dt)
+    derivative = alpha *derivative +(1-alpha)*derivative_raw
+    #derivative = (error-previous_error) /dt
+
     print('derivative',derivative)
 
+    print('P',KP * error)
+    print('I',KI * integral)
+    print('D',KD * derivative)
    #calculate the output
     output = KP * error + KI * integral + KD * derivative
     print ('output befor limit', output)
@@ -185,5 +197,5 @@ def follow_line():
 while True:
    #if keyboard.is_pressed('n'):
       follow_line()
-      #time.sleep(0.001)
+      time.sleep(0.001)
    
