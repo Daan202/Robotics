@@ -121,6 +121,8 @@ def object_detection():
 		elif is_green_detected(color_sensor):
 			# Robot found the plant
 			target = "GREEN_CUBE"
+	else:
+		pass
 	
 def move_boxes():
 	""" 
@@ -136,65 +138,69 @@ def move_boxes():
 
 	distance = robot.get_sonar_sensor()
 
+	# If it touches the it can push it to the specific zone
+	bumper = robot.get_bumper_sensor()
+
 	# If in spike(real life) we can just say if Red do that if Brown do that.
 
 	#----------Trash Brown cube-----------#
 
-	if target == "BROWN_CUBE":
-		# Compress and leave alone
-		left_motor.run(0)
-		right_motor.run(0)
-		robot.compress()
-		target = None
-		# This behavior took the control of the robot
-		return True 
-	
-	#----------Red cube-----------#
+	if any(bumper):
+		if target == "BROWN_CUBE":
+			# Compress and leave alone
+			left_motor.run(0)
+			right_motor.run(0)
+			robot.compress()
+			target = None
+			# This behavior took the control of the robot
+			return True 
+		
+		#----------Red cube-----------#
 
-	if target == "RED_CUBE":
+		if target == "RED_CUBE":
 
-		if is_red_detected(top_image_sensor):
+			if is_red_detected(top_image_sensor):
 
-			if distance < 0.5:
-				left_motor.run(0)
-				right_motor.run(0)
-				target = None
-				# This behavior took the control of the robot
-				return True
+				if distance < 0.5:
+					left_motor.run(0)
+					right_motor.run(0)
+					target = None
+					# This behavior took the control of the robot
+					return True
+				
+				# Robot moves to the red zone
+				left_motor.run(2)
+				right_motor.run(2)
+				return True 
 			
-			# Robot moves to the red zone
-			left_motor.run(2)
+			# Red zone is not in the view yet turn so you find it
+			left_motor.run(1)
 			right_motor.run(2)
 			return True 
+
+		#----------Plant Green cube-----------#
+
+		elif target == "GREEN_CUBE":
+
+			if is_blue_detected(top_image_sensor):
+
+				if distance < 0.5:
+					left_motor.run(0)
+					right_motor.run(0)
+					target = None
+					# This behavior took the control of the robot
+					return True
+			
+				# Robot moves to the Blue zone
+				left_motor.run(2)
+				right_motor.run(2)
+				return True 
 		
-		# Red zone is not in the view yet turn so you find it
-		left_motor.run(1)
-		right_motor.run(2)
-		return True 
-
-	#----------Plant Green cube-----------#
-
-	elif target == "GREEN_CUBE":
-
-		if is_blue_detected(top_image_sensor):
-
-			if distance < 0.5:
-				left_motor.run(0)
-				right_motor.run(0)
-				target = None
-				# This behavior took the control of the robot
-				return True
 		
-			# Robot moves to the Blue zone
-			left_motor.run(2)
+			# Blue zone is not in the view yet
+			left_motor.run(1)
 			right_motor.run(2)
 			return True 
-	
-	
-		# Blue zone is not in the view yet
-		left_motor.run(1)
-		right_motor.run(2)
-		return True 
 	
 	return False
 
