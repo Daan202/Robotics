@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import matplotlib.image as mpimg
 import keyboard
 
+
 client = RemoteAPIClient()
 sim = client.require("sim")
 
@@ -21,6 +22,8 @@ right_motor = Motor(sim, DeviceNames.MOTOR_RIGHT_OS, Direction.CLOCKWISE)
 def show_image(image):
     plt.imshow(image)
     plt.show()
+
+
 
 
 def wall_e():
