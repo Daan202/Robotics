@@ -6,7 +6,7 @@ import matplotlib.image as mpimg
 
 client = RemoteAPIClient()
 sim = client.require("sim")
-
+target = None
 # HANDLES FOR ACTUATORS AND SENSORS
 robot = Robot_OS(sim, DeviceNames.ROBOT_OS)
 
@@ -15,18 +15,22 @@ small_image_sensor = ImageSensor(sim, DeviceNames.SMALL_IMAGE_SENSOR_OS)
 
 left_motor = Motor(sim, DeviceNames.MOTOR_LEFT_OS, Direction.CLOCKWISE)
 right_motor = Motor(sim, DeviceNames.MOTOR_RIGHT_OS, Direction.CLOCKWISE)
-color_sensor = ImageSensor(sim, DeviceNames.IMAGE_SENSOR_LINE)
+color_sensor = ImageSensor(sim, DeviceNames.TOP_IMAGE_SENSOR_OS)
 
 # HELPER FUNCTION
 def show_image(image):
     plt.imshow(image)
     plt.show()
 
+# only brown block exists 
+# it will fall if it goes to the red zone 
+# here it is called top sensor 
 # Starts coppeliasim simulation if not done already
+
 sim.startSimulation()
 time.sleep(0.5)
 def low_battery():
-	return robot.get_battery() < 20
+	return robot.get_battery() < 0.20
 
 def is_red_detected(color_sensor):
     """
@@ -74,11 +78,20 @@ def is_brown(r,g,b):
 def avoid_obstacles():
     # lowest layer: Avoid collasions and obstacles
 	# use distance sensor not bumper the real robot has only distance sensor for now 
+	distance = robot.get_sonar_sensor()
 
 	bumper = robot.get_bumper_sensor()
-	if any(bumper): 
-		left_motor.run(-3)
-		right_motor.run(-3)
+	color_sensor._update_image()
+	r, g, b = color_sensor.rgb()
+	if is_red_detected(color_sensor) or is_brown(r,g,b) or is_green_detected(color_sensor):
+		return False
+	elif distance < 0.3:
+		print('distance is ',distance)
+		left_motor.run(-10)
+		right_motor.run(-10)
+		left_motor.run(0)
+		right_motor.run(5)
+
 		return True
 	return False 
 
@@ -100,6 +113,7 @@ def charge_battery():
 		return False 
 		
 def explore():
+
     # If you see no boxes move to find them 
 	left_motor.run(2)
 	right_motor.run(2)
@@ -111,16 +125,12 @@ def object_detection():
 	r, g, b = color_sensor.rgb()
 
 	if target is None:
-		if is_red_detected(color_sensor):
-			target = "RED_CUBE"
-
-		elif is_brown(r, g, b):
-			# Robot found a rash
-			target = "BROWN_CUBE"
-		
-		elif is_green_detected(color_sensor):
-			# Robot found the plant
+		if is_green_detected(color_sensor):
 			target = "GREEN_CUBE"
+
+		elif is_brown(r,g,b) or is_red_detected(color_sensor):
+			print("IS IN THE DS NHJKHONIN")
+			target = "BROWNISH_CUBE"
 	else:
 		pass
 	
@@ -144,8 +154,8 @@ def move_boxes():
 	# If in spike(real life) we can just say if Red do that if Brown do that.
 
 	#----------Trash Brown cube-----------#
-
 	if any(bumper):
+		print("TARGET IS ", target)
 		if target == "BROWN_CUBE":
 			# Compress and leave alone
 			left_motor.run(0)
@@ -158,6 +168,7 @@ def move_boxes():
 		#----------Red cube-----------#
 
 		if target == "RED_CUBE":
+			print("IN RED SECTION")
 
 			if is_red_detected(top_image_sensor):
 
@@ -214,7 +225,7 @@ while True:
 	if low_battery():
 		charge_battery()
 		continue
-
+	
 	object_detection()
 
 	if move_boxes():
