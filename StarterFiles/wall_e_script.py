@@ -6,7 +6,7 @@ from coppeliasim_zmqremoteapi_client import *
 import matplotlib.pyplot as plt
 import matplotlib.image as mpimg
 import keyboard
-
+from enum import Enum
 
 client = RemoteAPIClient()
 sim = client.require("sim")
@@ -21,20 +21,29 @@ front_camera = ImageSensor(sim, DeviceNames.SMALL_IMAGE_SENSOR_OS)
 left_motor = Motor(sim, DeviceNames.MOTOR_LEFT_OS, Direction.CLOCKWISE)
 right_motor = Motor(sim, DeviceNames.MOTOR_RIGHT_OS, Direction.CLOCKWISE)
 
+class Status (Enum):
+	CHARGING =1
+	CHARGED  =2
+	SEARCH  =3 
+
+
 #-----------------------------------------------------------------------------------------------
 # configurations variables
 MAX_SPEED = 6
-TURN_SPEED = 2
+TURN_SPEED = 1
 FORWARD_SPEED = 5
 BACKWARD_SPEED = 3
 SLOW_SPEED = 1
 
 MIN_PIXELS = 25
+LOW_BATTERY = 100
 
 #-----------------------------------------------------------------------------------------------
 # State variables
 last_print_time = 0.0
-
+drive_timer_started = False
+timer_time = 0
+status = Status.SEARCH
 #-----------------------------------------------------------------------------------------------
 # Basic robot movment Helper functions
 
@@ -67,6 +76,40 @@ def Move_backword(slow = False):
 	if slow:
 		drive(-SLOW_SPEED,-SLOW_SPEED)
 	drive(-BACKWARD_SPEED,-BACKWARD_SPEED)
+
+# Move towards a target 
+def drive_to (target):
+	# target [x]: is -1 on the left and 0 in the center and +1 on the right 
+	# use its value to give steering correction 
+	steering = 1.5 * target ["x"]
+
+	if target ["x"] >= 0 :
+		turn_direction =1
+	else:
+		turn_direction =-1 
+	
+	left = FORWARD_SPEED + steering
+	right = FORWARD_SPEED -steering
+	drive(left , right)
+
+# drive forward for a time 
+def drive_time (sec):
+	global drive_timer_started,timer_time
+
+	if not drive_timer_started :
+		timer_time = time.time() +sec
+		drive_timer_started = True
+		
+	if time.time()< timer_time :
+		Move_forward()
+	else:
+		stop()
+		drive_timer_started = False
+		return True
+
+	
+
+
 	
 #-----------------------------------------------------------------------------------------------
 #sensors Helper functions
@@ -103,7 +146,7 @@ def rgb_parts(image  : np.ndarray):
 def colour_mask(image, colour_name):
 
     red, green, blue = rgb_parts(image)
-    
+
 	# Plant cubes
     if colour_name == "green":
         return (green > 70) & (green > red + 20) & (green > blue + 20)
@@ -119,12 +162,15 @@ def colour_mask(image, colour_name):
     # Trash container
     if colour_name == "red":
         return (red > 85) & (red > green + 30) & (red > blue + 30) & (green < 120)
-	
+
     # Charging area
     if colour_name == "yellow":
         return (red > 90) & (green > 60) & (blue < 90) & (red > blue + 30)
-
-
+	
+	# compressed 
+    if colour_name == "black":
+       return (red <50) & (green <50) & (blue <50)
+	
 def find_colour (image , colour_name):
 	mask = colour_mask(image, colour_name)
 
@@ -156,16 +202,56 @@ def find_colour (image , colour_name):
 	normal_x = (center_x -32 ) / 32
 	normal_y = (center_y - 32) / 32
 
-	return normal_x, normal_y ,pixels
+	return {
+        "pixels": pixels,
+        "x": normal_x,
+        "y": normal_y,
+    }
 
+#choose the best visible cube to approach
+def choose_cube (image):
+	green_cube = find_colour(image,"green")
+	brown_cube = find_colour(image,"brown")
 
-
-
+	if green_cube is None and brown_cube is None:
+		return None, None
+	if green_cube is None:
+		return brown_cube, "trash"
+	if brown_cube is None:
+		return green_cube, "plant"
 	
+	#return the colour with more visible pixels 
+	if green_cube["pixels"] >= brown_cube["pixels"] : 
+		return green_cube, "plant"
+	else:
+		return brown_cube, "trash"
 
 
+#-----------------------------------------------------------------------------------------------
+# high level Actions
+
+def start_delivery (container_colour):
+	return False
+
+def go_to_charger (Top_image):
+	charger = find_colour(Top_image,"yellow")
+
+	if charger is None:
+		rotate (1)
+		return
+	if charger["pixels"] >=3500:
+		stop()
+		return
+	drive_to(charger)
+	print ( "pixels ",charger["pixels"])
+
+
+#-----------------------------------------------------------------------------------------------
+# Wall_e controller 
 def wall_e():
+	global status
 	sensors = read_sensors()
+	now  = time.time()
 
 	Manual = True
 	if Manual:
@@ -189,18 +275,52 @@ def wall_e():
 			stop()
 
 
-	now  = time.time()
+
 	global last_print_time
 	
 	if  now - last_print_time > 1.0:
-		#print ('battery level =',sensors["battery"])
+		print ('battery level =',sensors["battery"])
 		#print ("bumper sensor ",sensors["bumper"])
 		#print(" sonar sensor ",sensors["sonar"])
-		print ("sensor RGP :", sensors ["top_image_rgp"])
-		print ( "function RGP :", rgb_parts (sensors ["top_image"]))
-		print (" colouer mask :", colour_mask(sensors ["top_image"],"green"))
-		print ("find the colouer :", find_colour(sensors ["top_image"],"green"))
+		#print ("sensor RGP :", sensors ["top_image_rgp"])
+		#print ( "function RGP :", rgb_parts (sensors ["top_image"]))
+		#print (" colouer mask :", colour_mask(sensors ["top_image"],"green"))
+		#print ("find the colouer :", find_colour(sensors ["top_image"],"green"))
 		last_print_time = now
+	#-----------------------------------------------------
+	#steps
+
+	#charging is the highest poriorty status 
+	#if sensors["battery"] <  LOW_BATTERY: 
+	#	status = Status.CHARGING 
+	
+	match status:
+		case Status.CHARGING :
+			#go_to_charger(sensors["top_image"])
+			
+			arrive = drive_time(5)
+			print (" move for time ")
+
+			if arrive :# or sensors["battery"] >= 0.99 : 
+				status = Status.CHARGED
+
+		case Status.CHARGED :
+			print ("charged")
+
+		case Status.SEARCH :
+						
+			arrive = drive_time(5)
+			print (" move for time ")
+
+			if arrive :# or sensors["battery"] >= 0.99 : 
+				status = Status.CHARGED
+		
+		
+
+
+
+
+
 	
 
 
