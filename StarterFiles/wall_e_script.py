@@ -25,6 +25,8 @@ class Status (Enum):
 	CHARGING =1
 	CHARGED  =2
 	SEARCH  =3 
+	HANDLE_CUBE =4
+	DELIVERING =5
 
 
 #-----------------------------------------------------------------------------------------------
@@ -36,14 +38,19 @@ BACKWARD_SPEED = 3
 SLOW_SPEED = 1
 
 MIN_PIXELS = 25
-LOW_BATTERY = 100
+LOW_BATTERY = 0.25
 
 #-----------------------------------------------------------------------------------------------
 # State variables
 last_print_time = 0.0
 drive_timer_started = False
 timer_time = 0
-status = Status.SEARCH
+status = Status.DELIVERING #Status.SEARCH
+
+cube_type = None
+cube = None
+
+search_step =0
 #-----------------------------------------------------------------------------------------------
 # Basic robot movment Helper functions
 
@@ -93,7 +100,7 @@ def drive_to (target):
 	drive(left , right)
 
 # drive forward for a time 
-def drive_time (sec):
+def drive_time (Move_type ="F",sec =0):
 	global drive_timer_started,timer_time
 
 	if not drive_timer_started :
@@ -101,16 +108,16 @@ def drive_time (sec):
 		drive_timer_started = True
 		
 	if time.time()< timer_time :
-		Move_forward()
+		if Move_type =="F":
+			Move_forward()
+		if Move_type =="B":
+			Move_backword()
+		if Move_type =="R":
+			rotate(1)
 	else:
 		stop()
 		drive_timer_started = False
-		return True
-
-	
-
-
-	
+		return True	
 #-----------------------------------------------------------------------------------------------
 #sensors Helper functions
 
@@ -170,7 +177,8 @@ def colour_mask(image, colour_name):
 	# compressed 
     if colour_name == "black":
        return (red <50) & (green <50) & (blue <50)
-	
+
+# find a colour in the image 	
 def find_colour (image , colour_name):
 	mask = colour_mask(image, colour_name)
 
@@ -209,7 +217,7 @@ def find_colour (image , colour_name):
     }
 
 #choose the best visible cube to approach
-def choose_cube (image):
+def find_cube (image):
 	green_cube = find_colour(image,"green")
 	brown_cube = find_colour(image,"brown")
 
@@ -228,7 +236,7 @@ def choose_cube (image):
 
 
 #-----------------------------------------------------------------------------------------------
-# high level Actions
+# high level Layers 
 
 def start_delivery (container_colour):
 	return False
@@ -239,17 +247,59 @@ def go_to_charger (Top_image):
 	if charger is None:
 		rotate (1)
 		return
-	if charger["pixels"] >=3500:
-		stop()
-		return
+	if charger["pixels"] >=2000:
+		arrive = drive_time("F",0.5)
+		if arrive:
+			stop()
+			return
 	drive_to(charger)
-	print ( "pixels ",charger["pixels"])
+# move and rotate searching for cubes 
+def search ():
+	global search_step
+	if search_step == 0 :
+		rotate = drive_time("R",1)
+		if rotate :
+			search_step =0
+			rotate = False
+	if search_step == 1 :
+		forward = drive_time("F",0.7)
+		if forward :
+			search_step =1
+			forward = False
+
+# moving towarde cube 
+def handle_cube(top_image,front_image,cube_type):
+	
+	if cube_type ==None:
+		return
+	
+	if cube_type == "trash":
+		cube = find_colour(top_image,"brown")
+		front_opject = find_colour(front_image,"brown")
+	if cube_type == "plant":
+		cube = find_colour(top_image,"green")
+		front_opject = find_colour(front_image,"brown")
+
+	if front_opject is not None:
+		print ("front_opject Pixels",front_opject["pixels"])
+		if front_opject["pixels"] >= 1000 :
+			stop()
+			return True
+		
+	if cube is not None:
+		drive_to(cube)
+	
+def Compress_trash() :
+	robot
+
+
+	
 
 
 #-----------------------------------------------------------------------------------------------
 # Wall_e controller 
 def wall_e():
-	global status
+	global status,cube , cube_type 
 	sensors = read_sensors()
 	now  = time.time()
 
@@ -279,41 +329,61 @@ def wall_e():
 	global last_print_time
 	
 	if  now - last_print_time > 1.0:
-		print ('battery level =',sensors["battery"])
+		#print ('battery level =',sensors["battery"])
 		#print ("bumper sensor ",sensors["bumper"])
-		#print(" sonar sensor ",sensors["sonar"])
+		print(" sonar sensor ",sensors["sonar"])
 		#print ("sensor RGP :", sensors ["top_image_rgp"])
 		#print ( "function RGP :", rgb_parts (sensors ["top_image"]))
 		#print (" colouer mask :", colour_mask(sensors ["top_image"],"green"))
 		#print ("find the colouer :", find_colour(sensors ["top_image"],"green"))
+		print ( "cube:",cube)
+		print ("cube type :",cube_type)
 		last_print_time = now
 	#-----------------------------------------------------
 	#steps
 
 	#charging is the highest poriorty status 
-	#if sensors["battery"] <  LOW_BATTERY: 
-	#	status = Status.CHARGING 
+	if sensors["battery"] <  LOW_BATTERY and not status == Status.CHARGED : 
+		status = Status.CHARGING 
 	
 	match status:
 		case Status.CHARGING :
-			#go_to_charger(sensors["top_image"])
-			
-			arrive = drive_time(5)
-			print (" move for time ")
+			go_to_charger(sensors["top_image"])
+			print (" CHARGING ")
 
-			if arrive :# or sensors["battery"] >= 0.99 : 
+			if  sensors["battery"] >= 0.95 : 
 				status = Status.CHARGED
 
 		case Status.CHARGED :
-			print ("charged")
+			print ("CHARGED")
+			status = Status.CHARGING
 
 		case Status.SEARCH :
-						
-			arrive = drive_time(5)
-			print (" move for time ")
+			print ("SEARCH")
+			search()
+			cube , cube_type = find_cube(sensors["top_image"])
 
-			if arrive :# or sensors["battery"] >= 0.99 : 
-				status = Status.CHARGED
+			if cube is not None:
+				stop()
+				status = Status.HANDLE_CUBE
+
+		case Status.HANDLE_CUBE:
+			print ("HANDLE_CUBE")
+			if handle_cube(sensors["top_image"],sensors["front_image"],cube_type):
+				if cube_type == "trash":
+					if Compress_trash():
+						status = Status.DELIVERING
+
+				if cube_type == "plant":
+					status = Status.DELIVERING
+
+		
+
+
+
+						
+
+
 		
 		
 
