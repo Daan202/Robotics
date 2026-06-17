@@ -28,6 +28,8 @@ class Status (Enum):
 	HANDLE_CUBE =4
 	COMPRESS =5
 	DELIVERING =6
+	DONE =7
+	AVOID_WALL =8
 #-----------------------------------------------------------------------------------------------
 # configurations variables
 MAX_SPEED = 6
@@ -35,6 +37,7 @@ TURN_SPEED = 1
 FORWARD_SPEED = 5
 BACKWARD_SPEED = 3
 SLOW_SPEED = 1
+
 
 MIN_PIXELS = 25
 LOW_BATTERY = 0.25
@@ -45,13 +48,17 @@ CLEAR_SONAR = 0.47
 last_print_time = 0.0
 drive_timer_started = False
 timer_time = 0
-status = Status.SEARCH #Status.DELIVERING #
+status = Status.SEARCH  #Status.DONE #Status.DELIVERING 
+previous_state = 0
+do_not_interrupt = False
 in_position = False
 
 cube_type = None
 cube = None
 
 search_step =0
+compress_step =0 
+delivery_step =0
 #-----------------------------------------------------------------------------------------------
 # Basic robot movment Helper functions
 
@@ -77,13 +84,15 @@ def rotate(direction):
 def Move_forward(slow =False):
 	if slow:
 		drive(SLOW_SPEED,SLOW_SPEED)
-	drive(FORWARD_SPEED,FORWARD_SPEED)
+	else:
+		drive(FORWARD_SPEED,FORWARD_SPEED)
 
 # Move backword
 def Move_backword(slow = False):
 	if slow:
 		drive(-SLOW_SPEED,-SLOW_SPEED)
-	drive(-BACKWARD_SPEED,-BACKWARD_SPEED)
+	else:
+		drive(-BACKWARD_SPEED,-BACKWARD_SPEED)
 
 # Move towards a target 
 def drive_to (target):
@@ -155,6 +164,9 @@ def rgb_parts(image  : np.ndarray):
 def colour_mask(image, colour_name):
 
     red, green, blue = rgb_parts(image)
+    #print ("red", red)
+    #print ("green", green)
+    #print ("blue", blue)
 
 	# Plant cubes
     if colour_name == "green":
@@ -177,10 +189,22 @@ def colour_mask(image, colour_name):
     if colour_name == "yellow":
         return (red > 90) & (green > 60) & (blue < 90) & (red > blue + 30)
 	
-	# compressed 
+	# compressed cube
     if colour_name == "black":
        return (red <50) & (green <50) & (blue <50)
-
+	
+	#wall
+    if colour_name == "gray":
+        brightness = (red + green + blue) / 3
+        return (brightness >180) & (brightness <235) & (abs(red - green) < 20) & (abs(red - blue) < 40) & (abs(green - blue) < 35)
+	   # return ( (red == 137) & 
+			# (green == 137) & 
+			# (blue == 137) )
+			 #(abs(red - green) < 25) & 
+			 #(abs(red - blue) < 45) & 
+			 #(abs(green - blue) < 45))
+       
+        
 # find a colour in the image 	
 def find_colour (image , colour_name):
 	mask = colour_mask(image, colour_name)
@@ -241,8 +265,15 @@ def find_cube (image):
 #-----------------------------------------------------------------------------------------------
 # high level Layers 
 
-def start_delivery (container_colour):
-	return False
+def close_to_wall (top_image):
+	wall = find_colour(top_image,"gray")
+	
+	# wall is  is 0.6 in the hight of the image 
+	if wall is not None:
+		#print("wall y ",wall["y"])
+		if wall["y"] > 0.6 and not do_not_interrupt:
+			return True
+
 
 def go_to_charger (Top_image):
 	charger = find_colour(Top_image,"yellow")
@@ -250,10 +281,10 @@ def go_to_charger (Top_image):
 	if charger is None:
 		rotate (1)
 		return
-	if charger["pixels"] >=2500:
-		print ("charger pixels",charger["pixels"])
-		if drive_time("F",0.7):
-			print ("arrive")
+	if charger["pixels"] >=2000:
+		#print ("charger pixels",charger["pixels"])
+		if drive_time("F",0.5):
+			#print ("arrive")
 			stop()
 			return True
 	drive_to(charger)
@@ -298,27 +329,85 @@ def handle_cube(top_image,front_image,cube_type):
 
 #compress and handel compressed trash cube 	
 def Compress_trash(front_image,sonar) :
-	
-	robot.compress()
+	global compress_step
 	compressed_cube = find_colour(front_image,"black")
-	print ("sonar", sonar)
-	if sonar >= CLEAR_SONAR :
+
+	# compress the trash cube 
+	if compress_step == 0:
+		robot.compress()
+		#print ("sonar", sonar)
+		if sonar >= CLEAR_SONAR:
+			compress_step = 1
+
+	# moving forwarde creating space for rotation
+	if compress_step == 1:
+		if drive_time("F",0.2):
+			compress_step = 2
+
+	# rotate to the compressed cube 
+	if compress_step == 2:
 		rotate(1)
-	if compressed_cube is not None:
-		print("compressed cube pixels:",compressed_cube["pixels"])
-		if compressed_cube["pixels"] >= 4000:
+		if compressed_cube is not None:
+			#print("compressed cube pixels:",compressed_cube["pixels"])
+			if compressed_cube["pixels"] >= 2100:
+				stop()
+				compress_step =3
+
+	# move forwarde to the compressed cube
+	if compress_step == 3:
+		if drive_time("F",0.5):
+			compress_step = 0
+			return True	
+		
+# deliver cube to the container 				
+def cube_delivery(top_image,front_image,sonar,cube_type):
+	global delivery_step,do_not_interrupt
+
+	cube = find_colour(front_image,"black")
+	if cube_type == "trash":
+		container = find_colour(top_image,"red")
+	if cube_type == "plant":
+		container = find_colour(top_image,"blue")
+
+	#finde the container and go there 
+	if delivery_step ==0 :
+		if container is None:
+			rotate (1)
+			return
+		
+		drive_to(container)
+		if container["pixels"] >=2500:
+			#print ("charger pixels",container["pixels"])
 			stop()
+			delivery_step =1
+
+	# move slowly forwarde until drop the cube inthe container
+	if delivery_step==1:
+		do_not_interrupt = True
+		Move_forward(True)
+		#print ("sonar", sonar)
+		if  cube is None:#sonar >= CLEAR_SONAR or
+			print ("cube droped")
+			stop()
+			delivery_step =2
+
+	# move backword away from the container 	
+	if delivery_step==2:
+		if drive_time("B",0.7):	
+			delivery_step =3
+
+	# rotate away from the container 
+	if delivery_step==3:
+		if drive_time("R",0.7):
+			do_not_interrupt = False
 			return True
-
-
-
 	
 
-
+			
 #-----------------------------------------------------------------------------------------------
 # Wall_e controller 
 def wall_e():
-	global status,cube , cube_type ,in_position
+	global status,cube , cube_type ,in_position,previous_state,do_not_interrupt
 	sensors = read_sensors()
 	now  = time.time()
 
@@ -366,7 +455,21 @@ def wall_e():
 		if drive_time("B",0.7):
 			status = Status.CHARGING 
 	
+	#Avoid walls interrupt
+	if close_to_wall(sensors["top_image"]):
+		print ("wall is detected")
+		if status != Status.AVOID_WALL:
+			previous_state = status
+		status = Status.AVOID_WALL
+	
+	
 	match status:
+
+		case Status.AVOID_WALL:
+			print ("avoid wall")
+			if drive_time("R",3):
+				status = previous_state
+
 		case Status.CHARGING :
 			if not in_position :
 				in_position = go_to_charger(sensors["top_image"])
@@ -401,13 +504,19 @@ def wall_e():
 					status = Status.DELIVERING
 			
 		case Status.COMPRESS:
-
 			print ("COMPRESS")
 			if Compress_trash(sensors["front_image"],sensors["sonar"]):
 				print ("commpressed")
-
-
+				status = Status.DELIVERING
 		
+		case Status.DELIVERING:
+			print ("DELIVERING")
+			if cube_delivery(sensors["top_image"],sensors["front_image"],sensors["sonar"],cube_type):
+				status = Status.SEARCH
+
+		case Status.DONE:
+			print ("DONE")
+			
 
 
 
