@@ -1,4 +1,7 @@
 
+from math import fabs
+from shutil import move
+
 import numpy as np
 from robots import *
 import time
@@ -40,22 +43,22 @@ SLOW_SPEED = 1
 
 
 MIN_PIXELS = 25
-LOW_BATTERY = 0.25
-CLEAR_SONAR = 0.47
+LOW_BATTERY = 0.80
+CLEAR_SONAR = 0.21
 
 #-----------------------------------------------------------------------------------------------
 # State variables
 last_print_time = 0.0
 drive_timer_started = False
 timer_time = 0
-status = Status.SEARCH  #Status.DONE #Status.DELIVERING 
+status = Status.SEARCH   #Status.DONE   
 previous_state = 0
 do_not_interrupt = False
 in_position = False
 
 cube_type = None
 cube = None
-
+end_search = False
 search_step =0
 compress_step =0 
 delivery_step =0
@@ -164,7 +167,7 @@ def rgb_parts(image  : np.ndarray):
 def colour_mask(image, colour_name):
 
     red, green, blue = rgb_parts(image)
-    #print ("red", red)
+   # print ("red", red)
     #print ("green", green)
     #print ("blue", blue)
 
@@ -179,11 +182,13 @@ def colour_mask(image, colour_name):
 		     
     # Plant container
     if colour_name == "blue":
-        return (blue > 75) & (blue > red + 20) & (blue > green + 10)
+       # return (blue > 75) & (blue > red + 20) & (blue > green + 10) 
+       return (red < 60) & (green > 70)  & (blue > 100) 
 	
     # Trash container
     if colour_name == "red":
-        return (red > 85) & (red > green + 30) & (red > blue + 30) & (green < 120)
+        #return (red > 85) & (red > green + 30) & (red > blue + 30) & (green < 120)
+        return (red > 95) & (red < 160) & (red > blue + 70) & (red > blue + 70) & (green < 30)&(blue < 30)
 
     # Charging area
     if colour_name == "yellow":
@@ -266,6 +271,7 @@ def find_cube (image):
 # high level Layers 
 
 def close_to_wall (top_image):
+	global do_not_interrupt
 	wall = find_colour(top_image,"gray")
 	
 	# wall is  is 0.6 in the hight of the image 
@@ -273,15 +279,18 @@ def close_to_wall (top_image):
 		#print("wall y ",wall["y"])
 		if wall["y"] > 0.6 and not do_not_interrupt:
 			return True
+		return False
 
 
 def go_to_charger (Top_image):
+	global do_not_interrupt
 	charger = find_colour(Top_image,"yellow")
 
 	if charger is None:
 		rotate (1)
 		return
 	if charger["pixels"] >=2000:
+		do_not_interrupt = True
 		#print ("charger pixels",charger["pixels"])
 		if drive_time("F",0.5):
 			#print ("arrive")
@@ -291,25 +300,25 @@ def go_to_charger (Top_image):
 
 # move and rotate searching for cubes 
 def search ():
-	"""
-		global search_step
+	global search_step
 	if search_step == 0 :
-		rotate = drive_time("R",1)
-		if rotate :
+		if drive_time("R",0.7) :
 			search_step =1
-			rotate = False
 	if search_step == 1 :
-		forward = drive_time("F",0.7)
-		if forward :
+		if drive_time("F",1.3) :
 			search_step =0
-			forward = False
-	"""
-	rotate(1)
+	#rotate(1)
 
+# Reset search paramter after interupting search
+def reset_serch():
+	global drive_timer_started,timer_time,search_step
+	drive_timer_started = False
+	timer_time = 0
+	search_step =0
 
 # moving towarde cube 
 def handle_cube(top_image,front_image,cube_type):
-	
+	print("cube_type",cube_type)
 	if cube_type ==None:
 		return
 	if cube_type == "trash":
@@ -317,20 +326,26 @@ def handle_cube(top_image,front_image,cube_type):
 		front_opject = find_colour(front_image,"brown")
 	if cube_type == "plant":
 		cube = find_colour(top_image,"green")
-		front_opject = find_colour(front_image,"brown")
-
+		front_opject = find_colour(front_image,"green")
+	
 	if front_opject is not None:
-		#print ("front_opject Pixels",front_opject["pixels"])
+		print ("front_opject Pixels",front_opject["pixels"])
 		if front_opject["pixels"] >= 4000 :
 			stop()
 			return True	
 	if cube is not None:
+		print ("cube",cube)
 		drive_to(cube)
+	else:
+		Move_forward()
+	
+		
 
 #compress and handel compressed trash cube 	
 def Compress_trash(front_image,sonar) :
 	global compress_step
 	compressed_cube = find_colour(front_image,"black")
+	#print("compress_step",compress_step)
 
 	# compress the trash cube 
 	if compress_step == 0:
@@ -361,35 +376,41 @@ def Compress_trash(front_image,sonar) :
 		
 # deliver cube to the container 				
 def cube_delivery(top_image,front_image,sonar,cube_type):
+
 	global delivery_step,do_not_interrupt
 
-	cube = find_colour(front_image,"black")
+	print ("delivery_step",delivery_step)
+
 	if cube_type == "trash":
 		container = find_colour(top_image,"red")
+		no_cube = find_colour(front_image,"red")
 	if cube_type == "plant":
 		container = find_colour(top_image,"blue")
+		no_cube = find_colour(front_image,"blue")
 
 	#finde the container and go there 
 	if delivery_step ==0 :
 		if container is None:
-			rotate (1)
-			return
-		
-		drive_to(container)
-		if container["pixels"] >=2500:
-			#print ("charger pixels",container["pixels"])
-			stop()
-			delivery_step =1
+			search ()
+			return False
+		else:
+			reset_serch()
+			drive_to(container)
+			if container["pixels"] >=2000:
+				#print ("charger pixels",container["pixels"])
+				stop()
+				delivery_step =1
 
 	# move slowly forwarde until drop the cube inthe container
 	if delivery_step==1:
 		do_not_interrupt = True
 		Move_forward(True)
 		#print ("sonar", sonar)
-		if  cube is None:#sonar >= CLEAR_SONAR or
-			print ("cube droped")
-			stop()
-			delivery_step =2
+		if no_cube is not None:
+			if  no_cube["pixels"] >=2000: #is None:#sonar >= CLEAR_SONAR or
+				print ("cube droped")
+				stop()
+				delivery_step =2
 
 	# move backword away from the container 	
 	if delivery_step==2:
@@ -400,10 +421,8 @@ def cube_delivery(top_image,front_image,sonar,cube_type):
 	if delivery_step==3:
 		if drive_time("R",0.7):
 			do_not_interrupt = False
+			delivery_step =0
 			return True
-	
-
-			
 #-----------------------------------------------------------------------------------------------
 # Wall_e controller 
 def wall_e():
@@ -452,8 +471,9 @@ def wall_e():
 
 	#charging is the highest poriorty status 
 	if sensors["battery"] <  LOW_BATTERY and not status == Status.CHARGED : 
-		if drive_time("B",0.7):
-			status = Status.CHARGING 
+		if status !=Status.CHARGING:
+			if drive_time("B",0.7):
+				status = Status.CHARGING 
 	
 	#Avoid walls interrupt
 	if close_to_wall(sensors["top_image"]):
@@ -462,12 +482,12 @@ def wall_e():
 			previous_state = status
 		status = Status.AVOID_WALL
 	
-	
+
 	match status:
 
 		case Status.AVOID_WALL:
 			print ("avoid wall")
-			if drive_time("R",3):
+			if drive_time("R",1.3):
 				status = previous_state
 
 		case Status.CHARGING :
@@ -482,16 +502,16 @@ def wall_e():
 		case Status.CHARGED :
 			print ("CHARGED")
 			if drive_time("B",0.5) :
+				do_not_interrupt = False
 				status = Status.SEARCH
 
 		case Status.SEARCH :
 			print ("SEARCH")
 			search()
 			cube , cube_type = find_cube(sensors["top_image"])
-
 			if cube is not None:
+				reset_serch()
 				stop()
-
 				status = Status.HANDLE_CUBE
 
 		case Status.HANDLE_CUBE:
@@ -515,6 +535,7 @@ def wall_e():
 				status = Status.SEARCH
 
 		case Status.DONE:
+				
 			print ("DONE")
 			
 
