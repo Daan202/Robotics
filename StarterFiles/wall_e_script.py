@@ -25,7 +25,7 @@ left_motor = Motor(sim, DeviceNames.MOTOR_LEFT_OS, Direction.CLOCKWISE)
 right_motor = Motor(sim, DeviceNames.MOTOR_RIGHT_OS, Direction.CLOCKWISE)
 
 class Status (Enum):
-	CHARGING =1
+	NEEDCHARGING =1
 	CHARGED  =2
 	SEARCH  =3 
 	HANDLE_CUBE =4
@@ -212,6 +212,7 @@ def colour_mask(image, colour_name):
         
 # find a colour in the image 	
 def find_colour (image , colour_name):
+	
 	mask = colour_mask(image, colour_name)
 
 	# find the pixels with true value (the pixels that matching the requierd colour)
@@ -425,7 +426,7 @@ def cube_delivery(top_image,front_image,sonar,cube_type):
 			return True
 #-----------------------------------------------------------------------------------------------
 # Wall_e controller 
-def wall_e():
+def wall_e_controller():
 	global status,cube , cube_type ,in_position,previous_state,do_not_interrupt
 	sensors = read_sensors()
 	now  = time.time()
@@ -471,9 +472,9 @@ def wall_e():
 
 	#charging is the highest poriorty status 
 	if sensors["battery"] <  LOW_BATTERY and not status == Status.CHARGED : 
-		if status !=Status.CHARGING:
+		if status !=Status.NEEDCHARGING:
 			if drive_time("B",0.7):
-				status = Status.CHARGING 
+				status = Status.NEEDCHARGING 
 	
 	#Avoid walls interrupt
 	if close_to_wall(sensors["top_image"]):
@@ -490,7 +491,7 @@ def wall_e():
 			if drive_time("R",1.3):
 				status = previous_state
 
-		case Status.CHARGING :
+		case Status.NEEDCHARGING :
 			if not in_position :
 				in_position = go_to_charger(sensors["top_image"])
 				print (" CHARGING ")
@@ -539,23 +540,6 @@ def wall_e():
 			print ("DONE")
 			
 
-
-
-						
-
-
-		
-		
-
-
-
-
-
-	
-
-
-
-
 # MAIN CONTROL LOOP
 def main():
 	# Starts coppeliasim simulation if not done already
@@ -566,7 +550,7 @@ def main():
 		#print ('state :',state)
 
 		if state == sim.simulation_advancing_running:
-				wall_e()
+				wall_e_controller()
 				time.sleep(0.05)
 
 if  __name__ == "__main__":

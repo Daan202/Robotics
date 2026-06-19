@@ -14,9 +14,9 @@ right_motor = Motor(sim, DeviceNames.MOTOR_RIGHT_LINE, Direction.CLOCKWISE)
 color_sensor = ImageSensor(sim, DeviceNames.IMAGE_SENSOR_LINE)
 
 # PID settings
-KP =0.04#0.04#0.0.03 #0.025 #0.04
-KI =0.012#0.09 #0.012#0.015
-KD = 0.001#0.001#0.002
+KP =0.03#0.04#0.0.03 #0.025 #0.04
+KI =0.015#0.09 #0.012#0.015
+KD = 0.002#0.001#0.002
 TD = 0.04
 
 sample_time = 0.015#0.001#0.015
@@ -194,8 +194,23 @@ def follow_line():
 
 
 # MAIN CONTROL LOOP
-while True:
+#while True:
    #if keyboard.is_pressed('n'):
-      follow_line()
-      time.sleep(0.001)
+ #     follow_line()
+  #    time.sleep(0.001)
    
+# MAIN CONTROL LOOP
+def main():
+	# Starts coppeliasim simulation if not done already
+	sim.startSimulation()
+	
+	while True:
+		state = sim.getSimulationState()	
+		#print ('state :',state)
+
+		if state == sim.simulation_advancing_running:
+				follow_line()
+				time.sleep(0.001)
+
+if  __name__ == "__main__":
+	main()
