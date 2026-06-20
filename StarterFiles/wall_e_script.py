@@ -10,7 +10,6 @@ from enum import Enum
 client = RemoteAPIClient()
 sim = client.require("sim")
 
-
 # HANDLES FOR ACTUATORS AND SENSORS
 robot = Robot_OS(sim, DeviceNames.ROBOT_OS)
 
@@ -35,108 +34,12 @@ TURN_SPEED = 1
 FORWARD_SPEED = 5
 BACKWARD_SPEED = 3
 SLOW_SPEED = 1
-
-
 MIN_PIXELS = 25
 LOW_BATTERY = 0.25
 CLEAR_SONAR = 0.21
-
-#-----------------------------------------------------------------------------------------------
-# State variables
-last_print_time = 0.0
-drive_timer_started = False
-timer_time = 0
-behaviour = Behaviours.SEARCH   #Status.DONE   
-previous_state = 0
-do_not_interrupt = False
-in_position = False
-
-cube_type = None
-cube = None
-end_search = False
-search_step =0
-compress_step =0 
-delivery_step =0
-#-----------------------------------------------------------------------------------------------
-# Basic robot movment Helper functions
-
-#limit the motor speed between the max and min
-def limit (value):
-    return max (-MAX_SPEED, min(MAX_SPEED,value))
-
-# drive the left and right motors 
-def drive (left_speed , right_speed):
-	left_motor.run(limit(left_speed))
-	right_motor.run(limit(right_speed))
-
-# stop the robot
-def stop ():
-	drive (0,0)
-
-#rotate the robot direction 1 right -1 left 
-def rotate(direction):
-	drive(direction *TURN_SPEED , - direction* TURN_SPEED )
-
-# Move forward 
-def Move_forward(slow =False):
-	if slow:
-		drive(SLOW_SPEED,SLOW_SPEED)
-	else:
-		drive(FORWARD_SPEED,FORWARD_SPEED)
-
-# Move backword
-def Move_backword(slow = False):
-	if slow:
-		drive(-SLOW_SPEED,-SLOW_SPEED)
-	else:
-		drive(-BACKWARD_SPEED,-BACKWARD_SPEED)
-
-# Move towards a target 
-def drive_to (target):
-	# target [x]: is -1 on the left and 0 in the center and +1 on the right 
-	# using its value to give steering correction 
-	steering = 1.5 * target ["x"]
-
-	left = FORWARD_SPEED + steering
-	right = FORWARD_SPEED -steering
-	drive(left , right)
-
-# drive forward for a time 
-def drive_time (Move_type ="F",sec=0 ):
-	global drive_timer_started,timer_time
-
-	if not drive_timer_started :
-		timer_time = time.time() +sec
-		drive_timer_started = True
-
 	
-	if time.time()< timer_time :
-		if Move_type =="F":
-			Move_forward()
-		if Move_type =="B":
-			Move_backword()
-		if Move_type =="R":
-			rotate(1)
-	else:
-		stop()
-		drive_timer_started = False
-		return True	
 #-----------------------------------------------------------------------------------------------
-#sensors Helper functions
-
-def read_sensors ():
-	top_camera._update_image() 
-	front_camera._update_image()
-
-	return{
-		"battery"        : robot.get_battery(),
-		"sonar"          : robot.get_sonar_sensor(),
-		"bumper"         : robot.get_bumper_sensor(),
-		"top_image"      : top_camera.get_image(),
-		"top_image_rgp"  : top_camera.rgb(),
-		"front_image"    : front_camera.get_image(),
-		"front_image_rgp": front_camera.rgb(),
-	}
+# Utility functions
 
 #Split an RGB image into red, green and blue array
 def rgb_parts(image  : np.ndarray):
@@ -241,231 +144,324 @@ def find_cube (image):
 	else:
 		return brown_cube, "trash"
 
+class Wall_e :
+	def __init__(self):
+		self.last_print_time = 0.0
+		self.drive_timer_started = False
+		self.timer_time = 0
+		self.behaviour = Behaviours.SEARCH   #Status.DONE   
+		self.previous_state = 0
+		self.do_not_interrupt = False
+		self.in_position = False
 
-#-----------------------------------------------------------------------------------------------
-# high level Layers 
+		self.delivery_start_time = 0
 
-def close_to_wall (top_image):
-	global do_not_interrupt
-	wall = find_colour(top_image,"gray")
+		self.cube_type = None
+		self.cube = None
+		self.search_step =0
+		self.compress_step =0 
+		self.delivery_step =0
+
+	#----------------------Basic robot functions-------------------------
+
+	def read_sensors (self):
+		top_camera._update_image() 
+		front_camera._update_image()
+
+		return{
+			"battery"        : robot.get_battery(),
+			"sonar"          : robot.get_sonar_sensor(),
+			"bumper"         : robot.get_bumper_sensor(),
+			"top_image"      : top_camera.get_image(),
+			"front_image"    : front_camera.get_image(),
+		}
 	
-	# wall is  is 0.6 in the hight of the image 
-	if wall is not None:
-		if wall["y"] > 0.6 and not do_not_interrupt:
-			return True
-		return False
+	#limit the motor speed between the max and min
+	def limit (self,value):
+		return max (-MAX_SPEED, min(MAX_SPEED,value))
 
+	# drive the left and right motors 
+	def drive (self,left_speed , right_speed):
+		left_motor.run(self.limit(left_speed))
+		right_motor.run(self.limit(right_speed))
 
-def go_to_charger (Top_image):
-	global do_not_interrupt
-	charger = find_colour(Top_image,"yellow")
+	# stop the robot
+	def stop (self):
+		self.drive (0,0)
 
-	if charger is None:
-		rotate (1)
-		return
-	if charger["pixels"] >=2000:
-		do_not_interrupt = True
-		if drive_time("F",0.5):
-			stop()
-			return True
-	drive_to(charger)
+	#rotate the robot direction 1 right -1 left 
+	def rotate(self,direction):
+		self.drive(direction *TURN_SPEED , - direction* TURN_SPEED )
 
-# move and rotate searching for cubes 
-def search ():
-	global search_step
-	if search_step == 0 :
-		if drive_time("R",0.7) :
-			search_step =1
-	if search_step == 1 :
-		if drive_time("F",1.3) :
-			search_step =0
-
-# Reset search paramter after interupting search
-def reset_serch():
-	global drive_timer_started,timer_time,search_step
-	drive_timer_started = False
-	timer_time = 0
-	search_step =0
-
-# moving towarde cube 
-def handle_cube(top_image,front_image,cube_type):
-	if cube_type ==None:
-		return
-	if cube_type == "trash":
-		cube = find_colour(top_image,"brown")
-		front_opject = find_colour(front_image,"brown")
-	if cube_type == "plant":
-		cube = find_colour(top_image,"green")
-		front_opject = find_colour(front_image,"green")
-	
-	if front_opject is not None:
-		if front_opject["pixels"] >= 4000 :
-			stop()
-			return True	
-	if cube is not None:
-		drive_to(cube)
-	else:
-		Move_forward()
-			
-#compress and handel compressed trash cube 	
-def Compress_trash(front_image,sonar) :
-	global compress_step
-	compressed_cube = find_colour(front_image,"black")
-	#print("compress_step",compress_step)
-
-	# compress the trash cube 
-	if compress_step == 0:
-		robot.compress()
-		#print ("sonar", sonar)
-		if sonar >= CLEAR_SONAR:
-			compress_step = 1
-
-	# moving forwarde creating space for rotation
-	if compress_step == 1:
-		if drive_time("F",0.2):
-			compress_step = 2
-
-	# rotate to the compressed cube 
-	if compress_step == 2:
-		rotate(1)
-		if compressed_cube is not None:
-			#print("compressed cube pixels:",compressed_cube["pixels"])
-			if compressed_cube["pixels"] >= 2100:
-				stop()
-				compress_step =3
-
-	# move forwarde to the compressed cube
-	if compress_step == 3:
-		if drive_time("F",0.5):
-			compress_step = 0
-			return True	
-		
-# deliver cube to the container 				
-def cube_delivery(top_image,front_image,sonar,cube_type):
-
-	global delivery_step,do_not_interrupt
-
-	if cube_type == "trash":
-		container = find_colour(top_image,"red")
-		no_cube = find_colour(front_image,"red")
-	if cube_type == "plant":
-		container = find_colour(top_image,"blue")
-		no_cube = find_colour(front_image,"blue")
-
-	#finde the container and go there 
-	if delivery_step ==0 :
-		if container is None:
-			search ()
-			return False
+	# Move forward 
+	def Move_forward(self,slow =False):
+		if slow:
+			self.drive(SLOW_SPEED,SLOW_SPEED)
 		else:
-			reset_serch()
-			drive_to(container)
-			if container["pixels"] >=2000:
-				stop()
-				delivery_step =1
+			self.drive(FORWARD_SPEED,FORWARD_SPEED)
 
-	# move slowly forwarde until drop the cube inthe container
-	if delivery_step==1:
-		do_not_interrupt = True
-		Move_forward(True)
-		if no_cube is not None:
-			if  no_cube["pixels"] >=2000: #is None:#sonar >= CLEAR_SONAR or
-				print ("cube droped")
-				stop()
-				delivery_step =2
+	# Move backword
+	def Move_backword(self,slow = False):
+		if slow:
+			self.drive(-SLOW_SPEED,-SLOW_SPEED)
+		else:
+			self.drive(-BACKWARD_SPEED,-BACKWARD_SPEED)
 
-	# move backword away from the container 	
-	if delivery_step==2:
-		if drive_time("B",0.7):	
-			delivery_step =3
+	# Move towards a target 
+	def drive_to (self,target):
+		# target [x]: is -1 on the left and 0 in the center and +1 on the right 
+		# using its value to give steering correction 
+		steering = 1.5 * target ["x"]
 
-	# rotate away from the container 
-	if delivery_step==3:
-		if drive_time("R",0.7):
-			do_not_interrupt = False
-			delivery_step =0
+		left = FORWARD_SPEED + steering
+		right = FORWARD_SPEED -steering
+		self.drive(left , right)
+
+	# drive forward for a time 
+	def drive_time (self,Move_type ="F",sec=0 ):
+		if not self.drive_timer_started :
+			self.timer_time = time.time() +sec
+			self.drive_timer_started = True
+
+		
+		if time.time()< self.timer_time :
+			if Move_type =="F":
+				self.Move_forward()
+			if Move_type =="B":
+				self.Move_backword()
+			if Move_type =="R":
+				self.rotate(1)
+		else:
+			self.stop()
+			self.drive_timer_started = False
+			return True	
+	#------------------------behaviours------------------------------
+	def close_to_wall (self,top_image):
+		wall = find_colour(top_image,"gray")
+		
+		# wall is  is 0.6 in the hight of the image 
+		if wall is not None:
+			if wall["y"] > 0.6 and not self.do_not_interrupt:
+				return True
+			return False
+
+
+	def go_to_charger (self,Top_image):
+		charger = find_colour(Top_image,"yellow")
+
+		if charger is None:
+			self.rotate (1)
+			return
+		if charger["pixels"] >=2000:
+			self.do_not_interrupt = True
+			if self.drive_time("F",0.5):
+				self.stop()
+				return True
+		self.drive_to(charger)
+
+	# move and rotate searching for cubes 
+	def search (self):
+		if self.search_step == 0 :
+			if self.drive_time("R",0.7) :
+				self.search_step =1
+		if self.search_step == 1 :
+			if self.drive_time("F",1.3) :
+				self.search_step =0
+
+	# Reset search paramter after interupting search
+	def reset_serch(self):
+		self.drive_timer_started = False
+		self.timer_time = 0
+		self.search_step =0
+
+	# moving towarde cube 
+	def handle_cube(self,top_image,front_image,cube_type):
+		if cube_type ==None:
+			return
+		if cube_type == "trash":
+			cube = find_colour(top_image,"brown")
+			front_object = find_colour(front_image,"brown")
+		elif cube_type == "plant":
+			cube = find_colour(top_image,"green")
+			front_object = find_colour(front_image,"green")
+		else:
+			return False
+		
+		if front_object is not None:
+			if front_object["pixels"] >= 4000 :
+				self.stop()
+				return True	
+		if cube is not None:
+			self.drive_to(cube)
+		else:
+			self.Move_forward()
+				
+	#compress and handel compressed trash cube 	
+	def Compress_trash(self,front_image,sonar) :
+		compressed_cube = find_colour(front_image,"black")
+		#print("compress_step",compress_step)
+
+		# compress the trash cube 
+		if self.compress_step == 0:
+			robot.compress()
+			#print ("sonar", sonar)
+			if sonar >= CLEAR_SONAR:
+				self.compress_step = 1
+
+		# moving forwarde creating space for rotation
+		if self.compress_step == 1:
+			if self.drive_time("F",0.2):
+				self.compress_step = 2
+
+		# rotate to the compressed cube 
+		if self.compress_step == 2:
+			self.rotate(1)
+			if compressed_cube is not None:
+				#print("compressed cube pixels:",compressed_cube["pixels"])
+				if compressed_cube["pixels"] >= 2100:
+					self.stop()
+					self.compress_step =3
+
+		# move forwarde to the compressed cube
+		if self.compress_step == 3:
+			if self.drive_time("F",0.5):
+				self.compress_step = 0
+				return True	
+			
+	# deliver cube to the container 				
+	def cube_delivery(self,top_image,front_image,sonar,cube_type):
+		if cube_type == "trash":
+			container = find_colour(top_image,"red")
+			no_cube = find_colour(front_image,"red")
+		elif cube_type == "plant":
+			container = find_colour(top_image,"blue")
+			no_cube = find_colour(front_image,"blue")
+		else:
+			return False
+
+		# recorde the delivery starting time 
+		if self.delivery_step ==0 :
+			self.delivery_start_time = time.time()
+			self.delivery_step =1
+		
+		delivery_time = time.time() - self.delivery_start_time
+
+		#finde the container and go there 
+		if self.delivery_step ==1 :
+			if container is None:
+				self.search ()
+				return False
+			else:
+				self.reset_serch()
+				self.drive_to(container)
+				if container["pixels"] >=2000:
+					self.stop()
+					self.delivery_step =2
+
+		# move slowly forwarde until drop the cube inthe container
+		if self.delivery_step==2:
+			self.do_not_interrupt = True
+			self.Move_forward(True)
+			if no_cube is not None:
+				if  no_cube["pixels"] >=2000: #is None:#sonar >= CLEAR_SONAR or
+					print ("cube droped")
+					self.stop()
+					self.delivery_step =3
+
+		# move backword away from the container 	
+		if self.delivery_step==3:
+			if self.drive_time("B",0.7):	
+				self.delivery_step =4
+
+		# rotate away from the container 
+		if self.delivery_step==4:
+			if self.drive_time("R",0.7):
+				self.do_not_interrupt = False
+				self.delivery_step =0
+				return True
+			
+		# end the delivery if it take too longe
+		if delivery_time > 20 :
+			print ("delivery ended it takes too longe ")
 			return True
-#-----------------------------------------------------------------------------------------------
-# Wall_e controller 
-def wall_e_controller():
-	global behaviour,cube , cube_type ,in_position,previous_state,do_not_interrupt,last_print_time
+	#-----------------------Controller--------------------------------
+	def controller(self):
+		sensors = self.read_sensors()
+		now  = time.time()
 
-	sensors = read_sensors()
-	now  = time.time()
+		#print useful information every one sec
+		if  now - self.last_print_time > 1.0:
+			print (" current active behaviour is :", self.behaviour)
+			print (" Battery : ", sensors["battery"])
+			print (" current cube type:", self.cube_type)
+			self.last_print_time = now
+		#-----------------------------------------------------
+		#charging is the highest poriorty status 
+		if sensors["battery"] <  LOW_BATTERY and not self.behaviour == Behaviours.CHARGED : 
+			if self.behaviour !=Behaviours.NEEDCHARGING:
+				if self.drive_time("B",0.7):
+					self.behaviour = Behaviours.NEEDCHARGING 
+		
+		#always active check if the robot near a wall if True start avoiding the wall
+		if self.close_to_wall(sensors["top_image"]):
+			if self.behaviour != Behaviours.AVOID_WALL:
+				self.previous_state = self.behaviour
+			self.behaviour = Behaviours.AVOID_WALL
+		
 
-	#print useful information every one sec
-	if  now - last_print_time > 1.0:
-		print (" current active behaviour is :", behaviour)
-		print (" Battery : ", sensors["battery"])
-		print (" current cube type:", cube_type)
-		last_print_time = now
-	#-----------------------------------------------------
-	#charging is the highest poriorty status 
-	if sensors["battery"] <  LOW_BATTERY and not behaviour == Behaviours.CHARGED : 
-		if behaviour !=Behaviours.NEEDCHARGING:
-			if drive_time("B",0.7):
-				behaviour = Behaviours.NEEDCHARGING 
-	
-	#always active check if the robot near a wall if True start avoiding the wall
-	if close_to_wall(sensors["top_image"]):
-		if behaviour != Behaviours.AVOID_WALL:
-			previous_state = behaviour
-		behaviour = Behaviours.AVOID_WALL
-	
-	match behaviour:
-		case Behaviours.AVOID_WALL:
-			if drive_time("R",1.3):
-				behaviour = previous_state
+		if self.behaviour == Behaviours.AVOID_WALL:
+				if self.drive_time("R",1.3):
+					self.behaviour = self.previous_state
 
-		case Behaviours.NEEDCHARGING :
-			if not in_position :
-				in_position = go_to_charger(sensors["top_image"])
+		if self.behaviour == Behaviours.NEEDCHARGING :
+				if not self.in_position :
+					self.in_position = self.go_to_charger(sensors["top_image"])
 
-			if  sensors["battery"] >= 0.95 : 
-				in_position = False
-				behaviour = Behaviours.CHARGED
+				if  sensors["battery"] >= 0.95 : 
+					self.in_position = False
+					self.behaviour = Behaviours.CHARGED
 
-		case Behaviours.CHARGED :
-			if drive_time("B",0.5) :
-				do_not_interrupt = False
-				behaviour = Behaviours.SEARCH
+		if self.behaviour == Behaviours.CHARGED :
+				if self.drive_time("B",0.5) :
+					self.do_not_interrupt = False
+					self.behaviour = Behaviours.SEARCH
 
-		case Behaviours.DELIVERING:
-			if cube_delivery(sensors["top_image"],sensors["front_image"],sensors["sonar"],cube_type):
-				behaviour = Behaviours.SEARCH
+		if self.behaviour == Behaviours.DELIVERING:
+				if self.cube_delivery(sensors["top_image"],sensors["front_image"],sensors["sonar"],self.cube_type):
+					self.behaviour = Behaviours.SEARCH
 
-		case Behaviours.HANDLE_CUBE:
-			if handle_cube(sensors["top_image"],sensors["front_image"],cube_type):
-				if cube_type == "trash":
-					behaviour = Behaviours.COMPRESS
+		if self.behaviour == Behaviours.HANDLE_CUBE:
+				if self.handle_cube(sensors["top_image"],sensors["front_image"],self.cube_type):
+					if self.cube_type == "trash":
+						self.behaviour = Behaviours.COMPRESS
 
-				if cube_type == "plant":
-					behaviour = Behaviours.DELIVERING
-			
-		case Behaviours.COMPRESS:
-			if Compress_trash(sensors["front_image"],sensors["sonar"]):
-				print ("commpressed")
-				behaviour = Behaviours.DELIVERING
+					if self.cube_type == "plant":
+						self.behaviour = Behaviours.DELIVERING
+				
+		if self.behaviour == Behaviours.COMPRESS:
+				if self.Compress_trash(sensors["front_image"],sensors["sonar"]):
+					print ("commpressed")
+					self.behaviour = Behaviours.DELIVERING
 
-		case Behaviours.SEARCH :
-			search()
-			cube , cube_type = find_cube(sensors["top_image"])
-			if cube is not None:
-				reset_serch()
-				stop()
-				behaviour = Behaviours.HANDLE_CUBE
-			
+		if self.behaviour == Behaviours.SEARCH :
+				self.search()
+				self.cube , self.cube_type = find_cube(sensors["top_image"])
+				if self.cube is not None:
+					self.reset_serch()
+					self.stop()
+					self.behaviour = Behaviours.HANDLE_CUBE
+
 #-------------------------------------------------------------------------------------------------------------
 # MAIN CONTROL LOOP
 def main():
 	# Starts coppeliasim simulation if not done already
 	sim.startSimulation()
+	time.sleep(0.5)
+	wall_e = Wall_e()
 	while True:
 		state = sim.getSimulationState()	
-		#print ('state :',state)
-
 		if state == sim.simulation_advancing_running:
-				wall_e_controller()
+				wall_e.controller()
 				time.sleep(0.05)
 
 if  __name__ == "__main__":
